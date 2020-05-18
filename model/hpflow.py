@@ -25,6 +25,12 @@ class HyperpixelFlow:
         elif backbone == 'resnet101':
             self.backbone = resnet.resnet101(pretrained=True).to(device)
             nbottlenecks = [3, 4, 23, 3]
+        elif backbone == 'resnext50':
+            self.backbone = resnet.resnext50_32x4d(pretrained=True).to(device)
+            nbottlenecks = [3, 4, 6, 3]
+        elif backbone == 'resnext101':
+            self.backbone = resnet.resnext101_32x8d(pretrained=True).to(device)
+            nbottlenecks = [3, 4, 23, 3]
         elif backbone == 'fcn101':
             self.backbone = gcv.models.get_fcn_resnet101_voc(pretrained=True).to(device).pretrained
             nbottlenecks = [3, 4, 23, 3]

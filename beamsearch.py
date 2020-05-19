@@ -7,7 +7,6 @@ import time
 import glob
 import json
 import os
-from datetime import datetime
 
 from torch.utils.data import DataLoader
 import torch
@@ -65,7 +64,7 @@ def load_ckpt(ckptpath, benchmark, backbone, thres, alpha, beamsize, maxdepth):
 def save_ckpt(ckptpath, benchmark, backbone, thres, alpha, beamsize, maxdepth, membuf_topk, depth):
     if not os.path.isdir(ckptpath):
         os.mkdir(ckptpath)
-    file_name = datetime.now().strftime('ckpt_%Y%m%d_%H%M%S.txt')
+    file_name = datetime.datetime.now().strftime('ckpt_%Y%m%d_%H%M%S.txt')
     data = {
         "benchmark" : benchmark,
         "backbone" : backbone,

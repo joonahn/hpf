@@ -144,8 +144,8 @@ class HyperpixelFlow:
             if bid == 0:
                 dense_feat = [feat]
 
-            feat = self.backbone
-                .__getattr__('denseblock%d' % lid)
+            feat = self.backbone \
+                .__getattr__('denseblock%d' % lid) \
                 .__getattr__('denselayer%d' % (bid + 1)).forward(dense_feat)
             
             dense_feat.append(feat)
@@ -158,7 +158,7 @@ class HyperpixelFlow:
             # intermediate transition layer
             if hid != len(self.layer_ids) - 1 and self.bottleneck_ids[hid + 1] == 0:
                 feat = torch.cat(dense_feat, 1)
-                feat = self.backbone
+                feat = self.backbone \
                     .__getattr__('transition%d' % lid).forward(feat)
 
         # Up-sample & concatenate features to construct a hyperimage

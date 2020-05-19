@@ -96,7 +96,7 @@ def beamsearch_hp(datapath, benchmark, backbone, thres, alpha, logpath,
         init_depth = 1
 
     # 2. Search for the k-best base layers
-    if old_topk == None:
+    if membuf_topk == None:
         membuf_cand = []
         for base in candidate_base:
             start = time.time()

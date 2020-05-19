@@ -3,7 +3,7 @@
 from functools import reduce
 from operator import add
 
-from torchvision.models import resnet
+from torchvision.models import resnet, densenet
 import torch.nn.functional as F
 import torch
 import gluoncvth as gcv
@@ -25,6 +25,12 @@ class HyperpixelFlow:
         elif backbone == 'resnet101':
             self.backbone = resnet.resnet101(pretrained=True).to(device)
             nbottlenecks = [3, 4, 23, 3]
+        elif backbone == 'densenet121':
+            self.backbone = densenet.densenet121(pretrained=True).to(device)
+            nbottlenecks = [6, 12, 24, 16]
+        elif backbone == 'densenet169':
+            self.backbone = densenet.densenet169(pretrained=True).to(device)
+            nbottlenecks = [6, 12, 32, 32]
         elif backbone == 'fcn101':
             self.backbone = gcv.models.get_fcn_resnet101_voc(pretrained=True).to(device).pretrained
             nbottlenecks = [3, 4, 23, 3]
@@ -45,6 +51,7 @@ class HyperpixelFlow:
         self.hsfilter = geometry.gaussian2d(7).to(device)
         self.device = device
         self.benchmark = benchmark
+        self.backbone_name = backbone
 
     def __call__(self, *args, **kwargs):
         r"""Forward pass"""
@@ -55,7 +62,10 @@ class HyperpixelFlow:
 
     def extract_hyperpixel(self, img):
         r"""Given image, extract desired list of hyperpixels"""
-        hyperfeats, rfsz, jsz = self.extract_intermediate_feat(img.unsqueeze(0))
+        if self.backbone_name.startswith('densenet'):
+            hyperfeats, rfsz, jsz = self.extract_intermediate_feat_of_densenet(img.unsqueeze(0))
+        else:
+            hyperfeats, rfsz, jsz = self.extract_intermediate_feat(img.unsqueeze(0))
         hpgeometry = geometry.receptive_fields(rfsz, jsz, hyperfeats.size()).to(self.device)
         hyperfeats = hyperfeats.view(hyperfeats.size()[0], -1).t()
 
@@ -103,6 +113,53 @@ class HyperpixelFlow:
                 if hid + 1 == max(self.hyperpixel_ids):
                     break
             feat = self.backbone.__getattr__('layer%d' % lid)[bid].relu.forward(feat)
+
+        # Up-sample & concatenate features to construct a hyperimage
+        for idx, feat in enumerate(feats):
+            if idx == 0:
+                continue
+            feats[idx] = F.interpolate(feat, tuple(feats[0].size()[2:]), None, 'bilinear', True)
+        feats = torch.cat(feats, dim=1)
+
+        return feats[0], rfsz, jsz
+
+    def extract_intermediate_feat_of_densenet(self, img):
+        r"""Extract desired a list of intermediate features of DenseNet"""
+
+        print("densenet")
+        feats = []
+        rfsz = self.rfsz[self.hyperpixel_ids[0]]
+        jsz = self.jsz[self.hyperpixel_ids[0]]
+
+        # Layer 0
+        feat = self.backbone.features.conv0.forward(img)
+        feat = self.backbone.features.norm0.forward(feat)
+        feat = self.backbone.features.relu0.forward(feat)
+        feat = self.backbone.features.pool0.forward(feat)
+        if 0 in self.hyperpixel_ids:
+            feats.append(feat.clone())
+
+        # Layer 1-4
+        for hid, (bid, lid) in enumerate(zip(self.bottleneck_ids, self.layer_ids)):
+            if bid == 0:
+                dense_feat = [feat]
+
+            feat = self.backbone
+                .__getattr__('denseblock%d' % lid)
+                .__getattr__('denselayer%d' % (bid + 1)).forward(dense_feat)
+            
+            dense_feat.append(feat)
+
+            if hid + 1 in self.hyperpixel_ids:
+                feats.append(torch.cat(dense_feat, 1).clone())
+                if hid + 1 == max(self.hyperpixel_ids):
+                    break
+            
+            # intermediate transition layer
+            if hid != len(self.layer_ids) - 1 and self.bottleneck_ids[hid + 1] == 0:
+                feat = torch.cat(dense_feat, 1)
+                feat = self.backbone
+                    .__getattr__('transition%d' % lid).forward(feat)
 
         # Up-sample & concatenate features to construct a hyperimage
         for idx, feat in enumerate(feats):

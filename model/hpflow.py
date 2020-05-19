@@ -126,7 +126,6 @@ class HyperpixelFlow:
     def extract_intermediate_feat_of_densenet(self, img):
         r"""Extract desired a list of intermediate features of DenseNet"""
 
-        print("densenet")
         feats = []
         rfsz = self.rfsz[self.hyperpixel_ids[0]]
         jsz = self.jsz[self.hyperpixel_ids[0]]
@@ -144,7 +143,7 @@ class HyperpixelFlow:
             if bid == 0:
                 dense_feat = [feat]
 
-            feat = self.backbone \
+            feat = self.backbone.features \
                 .__getattr__('denseblock%d' % lid) \
                 .__getattr__('denselayer%d' % (bid + 1)).forward(dense_feat)
             
@@ -158,7 +157,7 @@ class HyperpixelFlow:
             # intermediate transition layer
             if hid != len(self.layer_ids) - 1 and self.bottleneck_ids[hid + 1] == 0:
                 feat = torch.cat(dense_feat, 1)
-                feat = self.backbone \
+                feat = self.backbone.features \
                     .__getattr__('transition%d' % lid).forward(feat)
 
         # Up-sample & concatenate features to construct a hyperimage

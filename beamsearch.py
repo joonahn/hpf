@@ -108,6 +108,7 @@ def beamsearch_hp(datapath, benchmark, backbone, thres, alpha, logpath,
         membuf_topk = find_topk(membuf_cand, beamsize)
         score_sel, layer_sel = find_topk(membuf_cand, 1)[0]
         log_selected(0, membuf_topk)
+        save_ckpt(ckptpath, benchmark, backbone, thres, alpha, beamsize, maxdepth, membuf_topk, 1)
 
     # 3. Proceed iterative search
     for depth in range(init_depth, maxdepth):

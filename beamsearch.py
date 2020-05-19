@@ -4,7 +4,10 @@ import datetime
 import argparse
 import logging
 import time
+import glob
+import json
 import os
+from datetime import datetime
 
 from torch.utils.data import DataLoader
 import torch
@@ -40,9 +43,45 @@ def log_selected(depth, membuf_topk):
         logging.info('%20s: %4.2f %%' % (layers, score))
     logging.info(' ====================================================')
 
+def load_ckpt(ckptpath, benchmark, backbone, thres, alpha, beamsize, maxdepth):
+    # logging.info
+    file_list = sorted(glob.glob(os.path.join(ckptpath, "ckpt*.txt")))
+    if not file_list:
+        return None, None
+    with open(file_list[-1]) as f:
+        ckpt_data = json.load(f)
+        if benchmark == ckpt_data['benchmark'] and \
+            backbone == ckpt_data['backbone'] and \
+            thres == ckpt_data['thres'] and \
+            alpha == ckpt_data['alpha'] and \
+            beamsize == ckpt_data['beamsize'] and \
+            maxdepth == ckpt_data['maxdepth']:
+            logging.info("load ckpt succeeded!")
+            return ckpt_data['depth'], ckpt_data['membuf_topk'] 
+        else:
+            logging.info("load ckpt failed!")
+    return None, None
+            
+def save_ckpt(ckptpath, benchmark, backbone, thres, alpha, beamsize, maxdepth, membuf_topk, depth):
+    if not os.path.isdir(ckptpath):
+        os.mkdir(ckptpath)
+    file_name = datetime.now().strftime('ckpt_%Y%m%d_%H%M%S.txt')
+    data = {
+        "benchmark" : benchmark,
+        "backbone" : backbone,
+        "thres" : thres,
+        "alpha" : alpha,
+        "beamsize" : beamsize,
+        "maxdepth" : maxdepth,
+        "membuf_topk" : membuf_topk,
+        "depth" : depth,
+    }
+    with open(file_name, 'w') as f:
+        json.dump(data, f)
+    logging.info("ckpt saved!")
 
 def beamsearch_hp(datapath, benchmark, backbone, thres, alpha, logpath,
-                  candidate_base, candidate_layers, beamsize, maxdepth):
+                  candidate_base, candidate_layers, beamsize, maxdepth, ckptpath):
     r"""Implementation of beam search for hyperpixel layers"""
 
     # 1. Model, and dataset initialization
@@ -52,21 +91,27 @@ def beamsearch_hp(datapath, benchmark, backbone, thres, alpha, logpath,
     dset = download.load_dataset(benchmark, datapath, thres, device, 'val')
     dataloader = DataLoader(dset, batch_size=1, num_workers=0)
 
+    # 1.5. Load Checkpoint file
+    init_depth, membuf_topk = load_ckpt(ckptpath, benchmark, backbone, thres, alpha, beamsize, maxdepth)
+    if init_depth == None:
+        init_depth = 1
+
     # 2. Search for the k-best base layers
-    membuf_cand = []
-    for base in candidate_base:
-        start = time.time()
-        hyperpixel = parse_layers(base)
-        score = evaluate.run(datapath, benchmark, backbone, thres, alpha,
-                             hyperpixel, logpath, True, model, dataloader)
-        log_evaluation(base, score, time.time() - start)
-        membuf_cand.append((score, base))
-    membuf_topk = find_topk(membuf_cand, beamsize)
-    score_sel, layer_sel = find_topk(membuf_cand, 1)[0]
-    log_selected(0, membuf_topk)
+    if old_topk == None:
+        membuf_cand = []
+        for base in candidate_base:
+            start = time.time()
+            hyperpixel = parse_layers(base)
+            score = evaluate.run(datapath, benchmark, backbone, thres, alpha,
+                                hyperpixel, logpath, True, model, dataloader)
+            log_evaluation(base, score, time.time() - start)
+            membuf_cand.append((score, base))
+        membuf_topk = find_topk(membuf_cand, beamsize)
+        score_sel, layer_sel = find_topk(membuf_cand, 1)[0]
+        log_selected(0, membuf_topk)
 
     # 3. Proceed iterative search
-    for depth in range(1, maxdepth):
+    for depth in range(init_depth, maxdepth):
         membuf_cand = []
         for _, test_layer in membuf_topk:
             for cand_layer in candidate_layers:
@@ -89,6 +134,7 @@ def beamsearch_hp(datapath, benchmark, backbone, thres, alpha, logpath,
             layer_sel = layer_tmp
             score_sel = score_tmp
         log_selected(depth, membuf_topk)
+        save_ckpt(ckptpath, benchmark, backbone, thres, alpha, beamsize, maxdepth, membuf_topk, depth + 1)
 
     # 4. Log best layer combination and validation performance
     logging.info('\nBest layers, score: %s %5.3f' % (layer_sel, score_sel))
@@ -100,6 +146,7 @@ if __name__ == '__main__':
     # Arguments parsing
     parser = argparse.ArgumentParser(description='Beam search for hyperpixel layers')
     parser.add_argument('--datapath', type=str, default='../Datasets_HPF')
+    parser.add_argument('--ckptpath', type=str, default='../Ckpt_HPF')
     parser.add_argument('--dataset', type=str, default='pfpascal')
     parser.add_argument('--backbone', type=str, default='resnet50')
     parser.add_argument('--thres', type=str, default='bbox', choices=['auto', 'img', 'bbox'])
@@ -126,4 +173,4 @@ if __name__ == '__main__':
     logging.info('Beam search on \'%s validation split\' with \'%s\' backbone...\n' %
                  (args.dataset, args.backbone))
     layer_sel = beamsearch_hp(args.datapath, args.dataset, args.backbone, args.thres, args.alpha,
-                              args.logpath, candidate_base, candidate_layers, args.beamsize, args.maxdepth)
+                              args.logpath, candidate_base, candidate_layers, args.beamsize, args.maxdepth, args.ckptpath)

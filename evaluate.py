@@ -38,7 +38,8 @@ def run(datapath, benchmark, backbone, thres, alpha, hyperpixel,
     if model is None:
         model = hpflow.HyperpixelFlow(backbone, hyperpixel, benchmark, device)
     else:
-        model.hyperpixel_ids = util.parse_hyperpixel(hyperpixel)
+        model.hyperpixel_weights = util.parse_hyperpixel(hyperpixel)
+        model.hyperpixel_ids = sorted(model.hyperpixel_weights.keys())
 
     # 4. Evaluator initialization
     evaluator = evaluation.Evaluator(benchmark, device)

@@ -70,9 +70,9 @@ def intersect1d(tensor1, tensor2):
     return aux[:-1][(aux[1:] == aux[:-1]).data]
 
 
-def parse_hyperpixel(hyperpixel_ids):
+def parse_hyperpixel(layer_weights):
     r"""Parse given hyperpixel list (string -> int)"""
-    return list(map(int, re.findall(r'\d+', hyperpixel_ids)))
+    return {x[0]: x[1] for x in re.findall(r'\d+', layer_weights)}
 
 
 def visualize_prediction(src_kps, prd_kps, src_img, trg_img, vispath, relaxation=2000):

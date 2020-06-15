@@ -15,7 +15,7 @@ from . import rhm
 
 class HyperpixelFlow:
     r"""Hyperpixel Flow framework"""
-    def __init__(self, backbone, hyperpixel_ids, benchmark, device):
+    def __init__(self, backbone, hyperpixel_weights, benchmark, device):
         r"""Constructor for Hyperpixel Flow framework"""
 
         # Feature extraction network initialization.
@@ -37,7 +37,8 @@ class HyperpixelFlow:
         # Hyperpixel id and pre-computed jump and receptive field size initialization
         # Reference: https://fomoro.com/research/article/receptive-field-calculator
         # (the jump and receptive field sizes for 'fcn101' are heuristic values)
-        self.hyperpixel_ids = util.parse_hyperpixel(hyperpixel_ids)
+        self.hyperpixel_weights = util.parse_hyperpixel(hyperpixel_weights)
+        self.hyperpixel_ids = sorted(self.hyperpixel_weights.keys())
         self.jsz = torch.tensor([4, 4, 4, 4, 8, 8, 8, 8, 16, 16]).to(device)
         self.rfsz = torch.tensor([11, 19, 27, 35, 43, 59, 75, 91, 107, 139]).to(device)
 
@@ -106,9 +107,11 @@ class HyperpixelFlow:
 
         # Up-sample & concatenate features to construct a hyperimage
         for idx, feat in enumerate(feats):
-            if idx == 0:
-                continue
-            feats[idx] = F.interpolate(feat, tuple(feats[0].size()[2:]), None, 'bilinear', True)
+            hyperpixel_id = self.hyperpixel_ids[idx]
+            num_channel = int(feat.size()[1] * self.hyperpixel_weights[hyperpixel_id])
+            feats[idx] = F.interpolate(feat, tuple([num_channel] + list(feats[0].size()[2:])), None, 'bilinear', True)
+            print("prev feat size:", feat.size())
+            print("new feat size:", feats[idx].size())
         feats = torch.cat(feats, dim=1)
 
         return feats[0], rfsz, jsz

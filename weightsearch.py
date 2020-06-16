@@ -43,7 +43,7 @@ def log_selected(depth, membuf_topk):
 
 
 def beamsearch_hp(datapath, benchmark, backbone, thres, alpha, logpath,
-                  candidate_base, candidate_layers, beamsize, maxdepth):
+                  candidate_base, candidate_layers, beamsize, maxdepth, armsize, weights):
     r"""Implementation of beam search for hyperpixel layers"""
 
     # 1. Model, and dataset initialization
@@ -53,43 +53,118 @@ def beamsearch_hp(datapath, benchmark, backbone, thres, alpha, logpath,
     dset = download.load_dataset(benchmark, datapath, thres, device, 'val')
     dataloader = DataLoader(dset, batch_size=1, num_workers=0)
 
-    # 2. Search for the k-best base layers
-    membuf_cand = []
-    for base in candidate_base:
-        start = time.time()
-        hyperpixel = parse_layers(base)
-        score = evaluate.run(datapath, benchmark, backbone, thres, alpha,
-                             hyperpixel, logpath, True, model, dataloader)
-        log_evaluation(base, score, time.time() - start)
-        membuf_cand.append((score, base))
-    membuf_topk = find_topk(membuf_cand, beamsize)
-    score_sel, layer_sel = find_topk(membuf_cand, 1)[0]
-    log_selected(0, membuf_topk)
+    # # 2. Search for the k-best base layers
+    # membuf_cand = []
+    # for base in candidate_base:
+    #     start = time.time()
+    #     hyperpixel = parse_layers(base)
+    #     score = evaluate.run(datapath, benchmark, backbone, thres, alpha,
+    #                          hyperpixel, logpath, True, model, dataloader)
+    #     log_evaluation(base, score, time.time() - start)
+    #     membuf_cand.append((score, base))
+    # membuf_topk = find_topk(membuf_cand, beamsize)
+    # score_sel, layer_sel = find_topk(membuf_cand, 1)[0]
+    # log_selected(0, membuf_topk)
 
-    # 3. Proceed iterative search
-    for depth in range(1, maxdepth):
-        membuf_cand = []
-        for _, test_layer in membuf_topk:
+    # # 3. Proceed iterative search
+    # for depth in range(1, maxdepth):
+    #     membuf_cand = []
+    #     for _, test_layer in membuf_topk:
+    #         for cand_layer in candidate_layers:
+    #             if cand_layer not in test_layer and cand_layer > min(test_layer):
+    #                 start = time.time()
+    #                 test_layers = sorted(test_layer + [cand_layer])
+    #                 if test_layers in list(map(lambda x: x[1], membuf_cand)):
+    #                     break
+    #                 hyperpixel = parse_layers(test_layers)
+    #                 score = evaluate.run(datapath, benchmark, backbone, thres, alpha,
+    #                                      hyperpixel, logpath, True, model, dataloader)
+
+    #                 log_evaluation(test_layers, score, time.time() - start)
+    #                 membuf_cand.append((score, test_layers))
+
+    #     membuf_topk = find_topk(membuf_cand, beamsize)
+    #     score_tmp, layer_tmp = find_topk(membuf_cand, 1)[0]
+
+    #     if score_tmp > score_sel:
+    #         layer_sel = layer_tmp
+    #         score_sel = score_tmp
+    #     log_selected(depth, membuf_topk)
+
+    ##################
+    # parameters
+    shrink_factor = 0.5
+    init_arm_size = armsize
+    max_shrink = 6
+    # layer_sel = {k:1.0 for k in candidate_layers}
+
+    # # search the best base layer:
+    # score_list = list()
+    # for base in candidate_base:
+    #     hyperpixel = parse_layers({base[0]:1.0})
+    #     start = time.time()
+    #     score = evaluate.run(datapath, benchmark, backbone, thres, alpha,
+    #                          hyperpixel, logpath, True, model, dataloader)
+    #     log_evaluation(hyperpixel, score, time.time() - start)
+    #     score_list.append(score)
+
+    # max_score = max(score_list)
+    # max_score_idx = score_list.index(max_score)
+    # layer_sel = {candidate_base[max_score_idx][0]: 1.0}
+    # score_sel = max_score
+
+    start = time.time()
+    layer_sel = util.parse_hyperpixel(weights)
+    score_sel = evaluate.run(datapath, benchmark, backbone, thres, alpha,
+                     weights, logpath, True, model, dataloader)
+    log_evaluation(weights, score_sel, time.time() - start)
+
+    # do a pattern search
+    print("pattern search started!")
+    for n_shrink in range(max_shrink):
+        arm_length = init_arm_size * (shrink_factor ** n_shrink)
+        print("***** current arm length:", arm_length)
+        while True:
+            # arm: tuple()
+            arm_list = list()
+            score_list = list()
             for cand_layer in candidate_layers:
-                if cand_layer not in test_layer and cand_layer > min(test_layer):
-                    start = time.time()
-                    test_layers = sorted(test_layer + [cand_layer])
-                    if test_layers in list(map(lambda x: x[1], membuf_cand)):
-                        break
-                    hyperpixel = parse_layers(test_layers)
-                    score = evaluate.run(datapath, benchmark, backbone, thres, alpha,
-                                         hyperpixel, logpath, True, model, dataloader)
+                if layer_sel.get(cand_layer, 0.0) - arm_length <= 0.0:
+                    if layer_sel.get(cand_layer, 0.0) != 0.0:
+                        arm_list.append((cand_layer, 0.0))
+                else:
+                    arm_list.append((cand_layer, layer_sel.get(cand_layer, 0.0) - arm_length))
 
-                    log_evaluation(test_layers, score, time.time() - start)
-                    membuf_cand.append((score, test_layers))
+                if layer_sel.get(cand_layer, 0.0) + arm_length >= 1.0:
+                    if layer_sel.get(cand_layer, 0.0) != 1.0:
+                        arm_list.append((cand_layer, 1.0))
+                else:
+                    arm_list.append((cand_layer, layer_sel.get(cand_layer, 0.0) + arm_length))
+            # check every arms
+            for arm in arm_list:
+                start = time.time()
+                test_layers = dict(layer_sel)
+                test_layers[arm[0]] = arm[1]
+                if all(v == 0.0 for v in test_layers.values()):
+                    score_list.append(0.0)
+                    continue
+                hyperpixel = parse_layers(test_layers)
+                score = evaluate.run(datapath, benchmark, backbone, thres, alpha,
+                                     hyperpixel, logpath, True, model, dataloader)
+                log_evaluation(hyperpixel, score, time.time() - start)
+                score_list.append(score)
 
-        membuf_topk = find_topk(membuf_cand, beamsize)
-        score_tmp, layer_tmp = find_topk(membuf_cand, 1)[0]
-
-        if score_tmp > score_sel:
-            layer_sel = layer_tmp
-            score_sel = score_tmp
-        log_selected(depth, membuf_topk)
+            max_score = max(score_list)
+            max_score_idx = score_list.index(max_score)
+            max_arm = arm_list[max_score_idx]
+            if max_score > score_sel:
+                print("score_sel uptated:", score_sel, "->", max_score)
+                print("arm: ", max_arm)
+                score_sel = max_score
+                layer_sel[max_arm[0]] = max_arm[1]
+                print("improved weights:", layer_sel)
+            else:
+                break
 
     # 4. Log best layer combination and validation performance
     logging.info('\nBest layers, score: %s %5.3f' % (layer_sel, score_sel))
@@ -107,6 +182,8 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=0.1)
     parser.add_argument('--logpath', type=str, default='')
     parser.add_argument('--beamsize', type=int, default=4)
+    parser.add_argument('--armsize', type=float, default=0.4)
+    parser.add_argument('--weights', type=str, default='{2:1.0}')
     parser.add_argument('--maxdepth', type=int, default=8)
     args = parser.parse_args()
 
@@ -127,4 +204,4 @@ if __name__ == '__main__':
     logging.info('Beam search on \'%s validation split\' with \'%s\' backbone...\n' %
                  (args.dataset, args.backbone))
     layer_sel = beamsearch_hp(args.datapath, args.dataset, args.backbone, args.thres, args.alpha,
-                              args.logpath, candidate_base, candidate_layers, args.beamsize, args.maxdepth)
+                              args.logpath, candidate_base, candidate_layers, args.beamsize, args.maxdepth, args.armsize, args.weights)

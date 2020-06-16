@@ -106,12 +106,15 @@ class HyperpixelFlow:
             feat = self.backbone.__getattr__('layer%d' % lid)[bid].relu.forward(feat)
 
         # Up-sample & concatenate features to construct a hyperimage
-        for idx, feat in enumerate(feats):
+        for idx in reversed(range(len(feats))):
+            feat = feats[idx]
             hyperpixel_id = self.hyperpixel_ids[idx]
             num_channel = int(feat.size()[1] * self.hyperpixel_weights[hyperpixel_id])
+            if num_channel == 0:
+                del feats[idx]
+                continue
             feats[idx] = F.interpolate(feat.unsqueeze(0), tuple([num_channel] + list(feats[0].size()[2:])), None, 'trilinear', True).squeeze(0)
-            print("prev feat size:", feat.size())
-            print("new feat size:", feats[idx].size())
+
         feats = torch.cat(feats, dim=1)
 
         return feats[0], rfsz, jsz
